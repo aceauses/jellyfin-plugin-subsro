@@ -20,6 +20,21 @@ public class ArchiveEntrySelectorTests
     }
 
     [Fact]
+    public void Rank_EpPattern_DoesNotCrossSeasonsWhenSeasonWordDisagrees()
+    {
+        // "EpNN" alone carries no season information; a decoy from a different season
+        // using the same convention must not outscore (or tie) the correct season match.
+        // Decoy's season word sorts ordinally *before* the correct file's, so without the
+        // cross-check both would tie at the full episode score and the ordinal tie-break
+        // would let the wrong-season decoy win — this pins that this cannot happen.
+        var entries = new[] { "Show - Ep05 - Sezonul 1.srt", "Show - Ep05 - Sezonul 2.srt" };
+
+        var ranked = ArchiveEntrySelector.Rank(entries, new MatchContext(null, 2, 5));
+
+        Assert.Equal("Show - Ep05 - Sezonul 2.srt", ranked[0].Path);
+    }
+
+    [Fact]
     public void Rank_IgnoresNonSubtitleFiles()
     {
         var entries = new[] { "readme.txt", "poster.jpg", "Show.S01E01.srt" };
