@@ -269,6 +269,35 @@ English so that outside contributors can work on it.
 Screenshots of the configuration page and of a subtitle search belong in
 the README once the plugin runs.
 
+## Distribution
+
+The plugin installs from inside Jellyfin — Dashboard, Plugins, Repositories,
+add a manifest URL, then install from the Catalog. No manual file copying.
+
+Two manifests are published, one per server generation, following the
+model Jellyfin Enhanced uses:
+
+```
+manifests/12/manifest.json       -> targetAbi 12.0.0.0
+manifests/10.11/manifest.json    -> targetAbi 10.11.0.0
+```
+
+Users add the URL matching their server version. Each manifest entry
+carries `version`, `targetAbi`, `sourceUrl` pointing at a GitHub release
+asset, and the `checksum` (MD5) Jellyfin verifies after download.
+
+**One assembly, two packages.** The same net9.0 build satisfies both
+generations — the evidence is in the Target Platform section above — so
+the two release ZIPs differ only in the `targetAbi` recorded in their
+bundled `meta.json`. There is no second codebase, no second branch, and
+no conditional compilation. Publishing two packages is a packaging step,
+not an engineering split.
+
+A release workflow builds once, emits both ZIPs, computes both checksums,
+attaches them to a GitHub release, and updates both manifests in the same
+commit. Manifests that disagree with the released artifacts are the main
+failure mode here, so a single job owns all of it.
+
 ## Repository
 
 - Name: `jellyfin-plugin-subsro`

@@ -1795,23 +1795,174 @@ git commit -m "Add subtitle download, series expansion, quota guard and search c
 - Consumes: the built assembly
 - Produces: a CI pipeline that builds and tests on every push
 
-- [ ] **Step 1: Write the plugin manifest**
+The plugin must install from inside Jellyfin via a repository manifest URL,
+with one manifest per server generation — the model Jellyfin Enhanced uses.
+The same net9.0 assembly serves both; only the `targetAbi` in each package's
+bundled `meta.json` differs.
 
-```yaml
-name: "Subs.ro"
-guid: "6f1d5a72-9c34-4e0b-9a55-2f8c1d7b4e90"
-version: "1.0.0.0"
-targetAbi: "10.11.0.0"
-framework: "net9.0"
-overview: "Romanian subtitles from subs.ro"
-description: "Fetches Romanian subtitles from subs.ro using its official API."
-category: "Subtitles"
-owner: "aceauses"
-artifacts:
-  - "Jellyfin.Plugin.SubsRo.dll"
+- [ ] **Step 1: Write the per-generation package metadata**
+
+Create `packaging/meta.10.11.json`:
+
+```json
+{
+  "name": "Subs.ro",
+  "guid": "6f1d5a72-9c34-4e0b-9a55-2f8c1d7b4e90",
+  "version": "1.0.0.0",
+  "targetAbi": "10.11.0.0",
+  "framework": "net9.0",
+  "overview": "Subtitrări în română de pe subs.ro",
+  "description": "Fetches Romanian subtitles from subs.ro using its official API.",
+  "category": "Subtitles",
+  "owner": "aceauses",
+  "assemblies": ["Jellyfin.Plugin.SubsRo.dll"]
+}
 ```
 
-- [ ] **Step 2: Write the CI workflow**
+Create `packaging/meta.12.json` — byte-identical except:
+
+```json
+  "targetAbi": "12.0.0.0",
+```
+
+- [ ] **Step 2: Write both repository manifests**
+
+Create `manifests/10.11/manifest.json`. The `checksum` is the MD5 of the
+release ZIP and Jellyfin refuses the install if it disagrees, so Step 4
+generates these values rather than a human typing them.
+
+```json
+[
+  {
+    "guid": "6f1d5a72-9c34-4e0b-9a55-2f8c1d7b4e90",
+    "name": "Subs.ro",
+    "description": "Subtitrări în română de pe subs.ro. Romanian subtitles for Jellyfin.",
+    "overview": "Subtitrări în română de pe subs.ro",
+    "owner": "aceauses",
+    "category": "Subtitles",
+    "versions": [
+      {
+        "version": "1.0.0.0",
+        "changelog": "Initial release.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/aceauses/jellyfin-plugin-subsro/releases/download/v1.0.0.0/subsro_1.0.0.0_10.11.zip",
+        "checksum": "REPLACED_BY_RELEASE_WORKFLOW",
+        "timestamp": "2026-09-01T00:00:00Z"
+      }
+    ]
+  }
+]
+```
+
+Create `manifests/12/manifest.json` — identical except `targetAbi` is
+`12.0.0.0` and the `sourceUrl` filename ends `_12.zip`.
+
+- [ ] **Step 3: Write a packaging script**
+
+Create `packaging/package.sh`. It builds once and emits both ZIPs, each
+carrying the same DLL and its own `meta.json`.
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+VERSION="${1:?usage: package.sh <version>}"
+OUT="artifacts"
+DLL="Jellyfin.Plugin.SubsRo/bin/Release/net9.0/Jellyfin.Plugin.SubsRo.dll"
+
+dotnet build -c Release
+rm -rf "$OUT" && mkdir -p "$OUT"
+
+for abi in 10.11 12; do
+  stage="$OUT/stage-$abi"
+  mkdir -p "$stage"
+  cp "$DLL" "$stage/"
+  sed "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" \
+      "packaging/meta.$abi.json" > "$stage/meta.json"
+  (cd "$stage" && zip -qr "../subsro_${VERSION}_${abi}.zip" .)
+  md5sum "$OUT/subsro_${VERSION}_${abi}.zip" | awk '{print $1}' \
+      > "$OUT/subsro_${VERSION}_${abi}.zip.md5"
+  rm -rf "$stage"
+done
+
+ls -1 "$OUT"
+```
+
+Make it executable: `chmod +x packaging/package.sh`
+
+- [ ] **Step 4: Write the release workflow**
+
+Create `.github/workflows/release.yml`. One job owns building, checksumming,
+publishing and manifest updating — manifests disagreeing with the released
+artifacts is the main failure mode, so nothing here is split across jobs.
+
+```yaml
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Derive version from tag
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Build both packages
+        run: ./packaging/package.sh "$VERSION"
+
+      - name: Update manifests with real checksums
+        run: |
+          TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          for abi in 10.11 12; do
+            SUM=$(cat "artifacts/subsro_${VERSION}_${abi}.zip.md5")
+            URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/subsro_${VERSION}_${abi}.zip"
+            jq --arg v "$VERSION" --arg s "$SUM" --arg u "$URL" --arg t "$TS" \
+              '.[0].versions[0] |= (.version=$v | .checksum=$s | .sourceUrl=$u | .timestamp=$t)' \
+              "manifests/${abi}/manifest.json" > tmp.json
+            mv tmp.json "manifests/${abi}/manifest.json"
+          done
+
+      - name: Commit updated manifests
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add manifests
+          git commit -m "Publish manifests for ${GITHUB_REF_NAME}"
+          git push origin HEAD:main
+
+      - name: Create the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.zip
+```
+
+- [ ] **Step 5: Verify packaging locally**
+
+Run: `./packaging/package.sh 1.0.0.0`
+
+Expected: `artifacts/` contains `subsro_1.0.0.0_10.11.zip`,
+`subsro_1.0.0.0_12.zip` and an `.md5` beside each. Confirm the two ZIPs
+differ ONLY in `meta.json`:
+
+```bash
+unzip -p artifacts/subsro_1.0.0.0_10.11.zip meta.json | grep targetAbi
+unzip -p artifacts/subsro_1.0.0.0_12.zip meta.json | grep targetAbi
+```
+
+Expected: `10.11.0.0` and `12.0.0.0` respectively.
+
+- [ ] **Step 6: Write the CI workflow**
 
 No API key is referenced anywhere: every test uses a stubbed transport.
 
@@ -1836,22 +1987,22 @@ jobs:
       - run: dotnet test --no-build -c Release --verbosity normal
 ```
 
-- [ ] **Step 3: Add the GPL-3.0 licence**
+- [ ] **Step 7: Add the GPL-3.0 licence**
 
 ```bash
 curl -sL https://www.gnu.org/licenses/gpl-3.0.txt -o LICENSE
 ```
 
-- [ ] **Step 4: Verify the release build produces the artifact**
+- [ ] **Step 8: Verify the release build produces the artifact**
 
 Run: `dotnet build -c Release && ls Jellyfin.Plugin.SubsRo/bin/Release/net9.0/Jellyfin.Plugin.SubsRo.dll`
 Expected: the DLL exists.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add -A
-git commit -m "Add plugin manifest, GPL-3.0 licence and CI workflow"
+git commit -m "Add dual-ABI packaging, repository manifests, release workflow and CI"
 ```
 
 ---
@@ -1871,7 +2022,18 @@ the first line. Content required by the spec:
 
 - What the plugin does; that a free subs.ro account is needed
 - Obtaining an API key, step by step, from registration to generating it
-- Installing from a repository URL, and from a manually downloaded release
+- **Installing via the in-Jellyfin installer**, which is the primary route:
+  Dashboard, Plugins, Repositories, add the manifest URL for your server
+  generation, then install from the Catalog and restart. Both URLs must
+  appear verbatim, each labelled with the version it serves, with an
+  explicit warning that using the wrong one makes the plugin fail to load:
+
+  ```
+  Jellyfin 12.x     https://raw.githubusercontent.com/aceauses/jellyfin-plugin-subsro/main/manifests/12/manifest.json
+  Jellyfin 10.11.x  https://raw.githubusercontent.com/aceauses/jellyfin-plugin-subsro/main/manifests/10.11/manifest.json
+  ```
+
+- Manual installation from a downloaded release ZIP, as the fallback route
 - Entering the key in the Jellyfin configuration page
 - Searching for subtitles on a movie, and what a successful result looks like
 - Enabling series support, and that it spends daily quota
@@ -1909,17 +2071,22 @@ git commit -m "Add English and Romanian user documentation"
 **Files:**
 - Modify: `README.md`, `README.ro.md` (screenshots, corrections)
 
-- [ ] **Step 1: Install the built plugin**
+- [ ] **Step 1: Install the built plugin the way a user would**
+
+The local server runs Jellyfin 12, so unpack the 12 package rather than
+copying a loose DLL — this exercises the same `meta.json` the installer
+ships, which is the artifact most likely to be wrong.
 
 ```bash
+./packaging/package.sh 1.0.0.0
 mkdir -p "/c/ProgramData/Jellyfin/Server/plugins/Subs.ro_1.0.0.0"
-cp Jellyfin.Plugin.SubsRo/bin/Release/net9.0/Jellyfin.Plugin.SubsRo.dll \
-   "/c/ProgramData/Jellyfin/Server/plugins/Subs.ro_1.0.0.0/"
-cp build.yaml "/c/ProgramData/Jellyfin/Server/plugins/Subs.ro_1.0.0.0/meta.json"
+unzip -o artifacts/subsro_1.0.0.0_12.zip \
+      -d "/c/ProgramData/Jellyfin/Server/plugins/Subs.ro_1.0.0.0"
 ```
 
-The manifest must be valid JSON named `meta.json`; convert the YAML fields by
-hand, matching the shape of the existing `Open Subtitles_24.0.0.0/meta.json`.
+Confirm the unpacked `meta.json` declares `"targetAbi": "12.0.0.0"` and sits
+beside the DLL, matching the layout of the existing
+`Open Subtitles_24.0.0.0/meta.json`.
 
 - [ ] **Step 2: Restart Jellyfin and confirm the plugin loads**
 
