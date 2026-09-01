@@ -56,13 +56,32 @@ Two observed behaviours shape the design:
 
 ## Target Platform
 
-Jellyfin 12 plugins target **net10.0**. Established by inspecting
-installed plugins: Intro Skipper (`targetAbi 12.0.0.0`) is compiled
-against `.NETCoreApp,Version=v10.0`. The Open Subtitles plugin
-(`targetAbi 10.11.8.0`, net9.0) still loads on Jellyfin 12, so net9.0 is
-a viable fallback if net10.0 tooling causes trouble.
+The plugin must run on **both Jellyfin 10.11 and Jellyfin 12** from a
+single build.
 
-Building requires the .NET 10 SDK.
+Evidence from an installed Jellyfin 12.0.0 server:
+
+| Plugin | targetAbi | Compiled against |
+|---|---|---|
+| Intro Skipper | `12.0.0.0` | `.NETCoreApp,Version=v10.0` |
+| Open Subtitles | `10.11.8.0` | `.NETCoreApp,Version=v9.0` |
+
+Open Subtitles is itself an `ISubtitleProvider` implementation, built for
+the 10.11 ABI against net9.0, and it loads and runs on Jellyfin 12. That
+is direct proof that one net9.0 assembly serves both server generations.
+Targeting net10.0 would gain nothing and would drop 10.11 users.
+
+Therefore:
+
+- **TargetFramework:** `net9.0`
+- **targetAbi:** `10.11.0.0` — the lowest supported server
+- **Jellyfin.Controller:** referenced at the 10.11 line
+
+The .NET 10 SDK is used to build; it compiles net9.0 targets. Should the
+`ISubtitleProvider` surface ever diverge between the two generations,
+the fallback is two build configurations from shared source, not two
+codebases. Verifying that the interface is in fact identical across both
+is the first implementation task.
 
 ## Architecture
 
@@ -219,6 +238,36 @@ examples.
 
 An optional integration test may exercise the real API, gated behind an
 environment variable and excluded from CI.
+
+## Documentation
+
+The plugin is aimed at Romanian users but published in an
+English-speaking ecosystem, so user-facing documentation ships in both
+languages. `README.md` leads in English; `README.ro.md` carries the full
+Romanian translation, and each links to the other at the top.
+
+Both cover, in order:
+
+- What the plugin does, and that it needs a free subs.ro account
+- **How to obtain an API key**, step by step, from registration through
+  generating the key in the user profile
+- Installing the plugin, both from a repository URL and from a manually
+  downloaded release
+- Entering the key in the Jellyfin configuration page
+- Searching for subtitles on a movie, with the expected result
+- Enabling series support and what it costs in daily quota
+- Supported Jellyfin versions (10.11 and 12)
+- Troubleshooting: no results, invalid key, exhausted quota, broken
+  diacritics, and where the server log records each case
+- How to report a mismatched subtitle, including the archive name, so
+  the selector test corpus can grow from real failures
+
+The configuration page inside Jellyfin is labelled in Romanian, matching
+its audience. Code, code comments, and the technical spec stay in
+English so that outside contributors can work on it.
+
+Screenshots of the configuration page and of a subtitle search belong in
+the README once the plugin runs.
 
 ## Repository
 
