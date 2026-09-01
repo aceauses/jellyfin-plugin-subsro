@@ -47,7 +47,10 @@ public sealed class ArchiveCache
         }
         catch (IOException)
         {
-            // IOException covers both IOException and UnauthorizedAccessException in this framework
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
             return null;
         }
         catch (NotSupportedException)
@@ -70,7 +73,10 @@ public sealed class ArchiveCache
         }
         catch (IOException)
         {
-            // IOException covers IOException, UnauthorizedAccessException, and PathTooLongException in this framework
+            // A cache miss next time is acceptable; a crash is not.
+        }
+        catch (UnauthorizedAccessException)
+        {
             // A cache miss next time is acceptable; a crash is not.
         }
         catch (NotSupportedException)
@@ -138,7 +144,10 @@ public sealed class ArchiveCache
         }
         catch (IOException)
         {
-            // IOException covers both IOException and UnauthorizedAccessException in this framework
+            // Ignore deletion failures to maintain cache consistency
+        }
+        catch (UnauthorizedAccessException)
+        {
             // Ignore deletion failures to maintain cache consistency
         }
     }
