@@ -35,17 +35,22 @@ public sealed class ArchiveCache
             return null;
         }
 
-        if (DateTime.UtcNow - File.GetLastWriteTimeUtc(path) > Lifetime)
-        {
-            TryDelete(path);
-            return null;
-        }
-
         try
         {
+            if (DateTime.UtcNow - File.GetLastWriteTimeUtc(path) > Lifetime)
+            {
+                TryDelete(path);
+                return null;
+            }
+
             return await File.ReadAllBytesAsync(path).ConfigureAwait(false);
         }
         catch (IOException)
+        {
+            // IOException covers both IOException and UnauthorizedAccessException in this framework
+            return null;
+        }
+        catch (NotSupportedException)
         {
             return null;
         }
@@ -64,6 +69,11 @@ public sealed class ArchiveCache
             await File.WriteAllBytesAsync(PathFor(subtitleId), payload).ConfigureAwait(false);
         }
         catch (IOException)
+        {
+            // IOException covers IOException, UnauthorizedAccessException, and PathTooLongException in this framework
+            // A cache miss next time is acceptable; a crash is not.
+        }
+        catch (NotSupportedException)
         {
             // A cache miss next time is acceptable; a crash is not.
         }
@@ -128,7 +138,8 @@ public sealed class ArchiveCache
         }
         catch (IOException)
         {
-            // Ignore.
+            // IOException covers both IOException and UnauthorizedAccessException in this framework
+            // Ignore deletion failures to maintain cache consistency
         }
     }
 }
