@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head><title>Subs.ro</title></head>
+<body>
+<div id="SubsRoConfigPage" data-role="page" class="page type-interior pluginConfigurationPage">
+  <div data-role="content"><div class="content-primary">
+    <form id="SubsRoConfigForm">
+      <div class="inputContainer">
+        <label class="inputLabel" for="ApiKey">Cheie API subs.ro</label>
+        <input is="emby-input" type="text" id="ApiKey" required />
+        <div class="fieldDescription">
+          Generează cheia din profilul tău de pe subs.ro. Fără ea pluginul nu caută nimic.
+        </div>
+      </div>
+      <label class="checkboxContainer">
+        <input is="emby-checkbox" type="checkbox" id="EnableSeries" />
+        <span>Caută subtitrări și pentru seriale</span>
+      </label>
+      <div class="fieldDescription">
+        Pentru seriale se descarcă arhiva sezonului, deci se consumă din cota zilnică.
+      </div>
+      <p id="QuotaDisplay" class="fieldDescription">Cotă rămasă: necunoscută</p>
+      <button is="emby-button" type="submit" class="raised button-submit block">
+        <span>Salvează</span>
+      </button>
+    </form>
+  </div></div>
+  <script type="text/javascript">
+    var SubsRoConfig = { pluginUniqueId: '6f1d5a72-9c34-4e0b-9a55-2f8c1d7b4e90' };
+
+    document.querySelector('#SubsRoConfigPage')
+      .addEventListener('pageshow', function () {
+        Dashboard.showLoadingMsg();
+        ApiClient.getPluginConfiguration(SubsRoConfig.pluginUniqueId).then(function (config) {
+          document.querySelector('#ApiKey').value = config.ApiKey || '';
+          document.querySelector('#EnableSeries').checked = !!config.EnableSeries;
+          Dashboard.hideLoadingMsg();
+        });
+
+        ApiClient.getJSON(ApiClient.getUrl('SubsRo/Quota')).then(function (q) {
+          var el = document.querySelector('#QuotaDisplay');
+          if (!q.configured) {
+            el.textContent = 'Cotă rămasă: introdu mai întâi cheia API';
+          } else if (!q.reachable) {
+            el.textContent = 'Cotă rămasă: subs.ro nu răspunde sau cheia este invalidă';
+          } else {
+            el.textContent = 'Cotă rămasă: ' + q.Remaining + ' din ' + q.Total + ' pe zi';
+          }
+        });
+      });
+
+    document.querySelector('#SubsRoConfigForm')
+      .addEventListener('submit', function (e) {
+        e.preventDefault();
+        Dashboard.showLoadingMsg();
+        ApiClient.getPluginConfiguration(SubsRoConfig.pluginUniqueId).then(function (config) {
+          config.ApiKey = document.querySelector('#ApiKey').value;
+          config.EnableSeries = document.querySelector('#EnableSeries').checked;
+          ApiClient.updatePluginConfiguration(SubsRoConfig.pluginUniqueId, config)
+            .then(Dashboard.processPluginConfigurationUpdateResult);
+        });
+        return false;
+      });
+  </script>
+</div>
+</body>
+</html>
