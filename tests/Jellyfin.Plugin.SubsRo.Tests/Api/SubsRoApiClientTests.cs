@@ -66,7 +66,11 @@ public class SubsRoApiClientTests
     [InlineData(HttpStatusCode.TooManyRequests)]
     public async Task SearchAsync_ErrorStatus_ReturnsEmptyWithoutThrowing(HttpStatusCode status)
     {
-        var client = Build(new StubHandler(status, "{}"));
+        // Body contains items to prove the status check (not lack of items) causes empty result
+        const string bodyWithItems = """
+        {"status":200,"count":1,"items":[{"id":1,"type":"movie","downloadLink":"https://example.com"}]}
+        """;
+        var client = Build(new StubHandler(status, bodyWithItems));
 
         var items = await client.SearchAsync("imdbid", "tt1", "key", CancellationToken.None);
 
@@ -92,5 +96,27 @@ public class SubsRoApiClientTests
         var quota = await client.GetQuotaAsync("key", CancellationToken.None);
 
         Assert.Equal(288, quota!.Remaining);
+    }
+
+    [Fact]
+    public async Task DownloadAsync_MalformedUri_ReturnsNullWithoutThrowing()
+    {
+        var client = Build(new StubHandler(HttpStatusCode.OK, "data"));
+
+        // Malformed URI should not throw
+        var data = await client.DownloadAsync("http://", "key", CancellationToken.None);
+
+        Assert.Null(data);
+    }
+
+    [Fact]
+    public async Task DownloadAsync_ApiKeyWithNewline_ReturnsNullWithoutThrowing()
+    {
+        var client = Build(new StubHandler(HttpStatusCode.OK, "data"));
+
+        // API key with newline should not throw
+        var data = await client.DownloadAsync("https://subs.ro/api/v1.0/subtitle/1/download", "key\n", CancellationToken.None);
+
+        Assert.Null(data);
     }
 }

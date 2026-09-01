@@ -65,11 +65,11 @@ public sealed class SubsRoApiClient
 
     public async Task<byte[]?> DownloadAsync(string downloadLink, string apiKey, CancellationToken ct)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, downloadLink);
-        request.Headers.Add(ApiKeyHeader, apiKey);
-
         try
         {
+            using var request = new HttpRequestMessage(HttpMethod.Get, downloadLink);
+            request.Headers.Add(ApiKeyHeader, apiKey);
+
             using var response = await _client.SendAsync(request, ct).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
@@ -78,6 +78,12 @@ public sealed class SubsRoApiClient
             }
 
             return await response.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+        }
+        catch (FormatException ex)
+        {
+            // UriFormatException (malformed URL) or FormatException (invalid API key) from Headers.Add
+            _logger.LogWarning(ex, "subs.ro download failed due to format error");
+            return null;
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
@@ -88,12 +94,12 @@ public sealed class SubsRoApiClient
 
     private async Task<string?> SendAsync(string url, string apiKey, CancellationToken ct)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.Add(ApiKeyHeader, apiKey);
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-
         try
         {
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Add(ApiKeyHeader, apiKey);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
             using var response = await _client.SendAsync(request, ct).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
@@ -102,6 +108,12 @@ public sealed class SubsRoApiClient
             }
 
             return await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        }
+        catch (FormatException ex)
+        {
+            // UriFormatException (malformed URL) or FormatException (invalid API key) from Headers.Add
+            _logger.LogWarning(ex, "subs.ro request failed due to format error");
+            return null;
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
